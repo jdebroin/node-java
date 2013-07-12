@@ -5,6 +5,7 @@
 #include <sstream>
 #include "javaObject.h"
 #include "java.h"
+#include <node_buffer.h>
 
 #define MODIFIER_STATIC 9
 
@@ -268,6 +269,16 @@ jobject v8ToJava(JNIEnv* env, v8::Local<v8::Value> arg) {
     return env->NewObject(clazz, constructor, val);
   }
 
+  // Special case for Byte array: use node Buffer
+  if (node::Buffer::HasInstance(arg)) {
+    v8::Local<v8::Object> buffer = arg->ToObject();
+    const jbyte* bufferData = (const jbyte*)node::Buffer::Data(buffer);
+    uint32_t bufferSize = node::Buffer::Length(buffer);
+    jbyteArray result = env->NewByteArray(bufferSize);
+    env->SetByteArrayRegion(result, 0, bufferSize, bufferData);
+    return result;
+  }
+
   if(arg->IsObject()) {
     v8::Local<v8::Object> obj = v8::Object::Cast(*arg);
 
@@ -421,6 +432,17 @@ v8::Handle<v8::Value> javaArrayToV8(Java* java, JNIEnv* env, jobjectArray objArr
   jsize arraySize = env->GetArrayLength(objArray);
   //printf("array size: %d\n", arraySize);
 
+  // Special case for Byte array: use node Buffer
+  if(arrayComponentType == TYPE_BYTE) {
+    jbyte* elems = env->GetByteArrayElements((jbyteArray)objArray, 0);
+
+    node::Buffer* buffer = node::Buffer::New(arraySize);
+    memcpy(node::Buffer::Data(buffer), elems, arraySize); 
+
+    env->ReleaseByteArrayElements((jbyteArray)objArray, elems, 0);
+    return scope.Close(buffer->handle_);
+  }
+
   v8::Handle<v8::Array> result = v8::Array::New(arraySize);
   switch(arrayComponentType) {
   case TYPE_INT:
@@ -433,6 +455,7 @@ v8::Handle<v8::Value> javaArrayToV8(Java* java, JNIEnv* env, jobjectArray objArr
     }
     break;
 
+    /* Use special case above for BYTE arrays
   case TYPE_BYTE:
     {
       jbyte* elems = env->GetByteArrayElements((jbyteArray)objArray, 0);
@@ -442,6 +465,7 @@ v8::Handle<v8::Value> javaArrayToV8(Java* java, JNIEnv* env, jobjectArray objArr
       env->ReleaseByteArrayElements((jbyteArray)objArray, elems, 0);
     }
     break;
+    */
 
   case TYPE_BOOLEAN:
     {
